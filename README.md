@@ -1,38 +1,46 @@
-# TCP Echo Service
+# Generating Certificates for Bootstrapping Multicluster / Mesh Expansion Chain of Trust
 
-This sample runs [TCP Echo Server](src/) as an Istio service. TCP Echo Server
-allows you to connect to it over TCP and echoes back data sent to it along with
-a preconfigured prefix.
+The directory contains two Makefiles for generating new root, intermediate certificates and workload certificates:
+- `Makefile.k8s.mk`: Creates certificates based on a root-ca from a k8s cluster. The current context in the default
+`kubeconfig` is used for accessing the cluster.
+- `Makefile.selfsigned.mk`: Creates certificates based on a generated self-signed root.
 
-## Usage
+The table below describes the targets supported by both Makefiles.
 
-To run the TCP Echo Service sample:
+Make Target | Makefile | Description
+------ | -------- | -----------
+`root-ca` | `Makefile.selfsigned.mk` | Generates a self-signed root CA key and certificate.
+`fetch-root-ca` | `Makefile.k8s.mk` | Fetches the Istio CA from the Kubernetes cluster, using the current context in the default `kubeconfig`.
+`$NAME-cacerts` | Both | Generates intermediate certificates signed by the root CA for a cluster or VM with `$NAME` (e.g., `us-east`, `cluster01`, etc.). They are stored under `$NAME` directory. To differentiate between clusters, we include a `Location` (`L`) designation in the certificates `Subject` field, with the cluster's name.
+`$NAMESPACE-certs` | Both | Generates intermediate certificates and sign certificates for a virtual machine connected to the namespace `$NAMESPACE` using serviceAccount `$SERVICE_ACCOUNT` using the root cert and store them under `$NAMESPACE` directory.
+`clean` | Both | Removes any generated root certificates, keys, and intermediate files.
 
-1. Install Istio by following the [istio install instructions](https://istio.io/docs/setup/kubernetes/quick-start.html).
+For example:
 
-1. Start the `tcp-echo-server` service inside the Istio service mesh:
+```bash
+make -f Makefile.selfsigned.mk root-ca
+```
 
-    ```console
-    $ kubectl apply -f <(istioctl kube-inject -f tcp-echo.yaml)
-    service/tcp-echo created
-    deployment.apps/tcp-echo created
-    ```
+Note that the Makefile generates long-lived intermediate certificates. While this might be
+acceptable for demonstration purposes, a more realistic and secure deployment would use
+short-lived and automatically renewed certificates for the intermediate CAs.
 
-1. Test by running the `nc` command from a `busybox` container from within the cluster.
+## Creating Certificates Using an Existing Istio CA
 
-    ```console
-    $ kubectl run -i --rm --restart=Never dummy --image=busybox -- sh -c "echo world | nc tcp-echo 9000"
-    hello world
-    pod "dummy" deleted
-    ```
+```bash
+make -f Makefile.k8s.mk fetch-root-ca
+```
 
-    As you observe, sending _world_ on a TCP connection to the server results in
-    the server prepending _hello_ and echoing back with _hello world_.
+The `fetch-root-ca` target retrieves the root CA certificate and key from an Istio-enabled Kubernetes cluster. This process is useful when establishing a trusted certificate chain across multiple clusters or environments using an existing Istio root certificate. **By default, it fetches the certificate and key from the `istio-ca-secret`, and if that is not available, it retrieves them from the `cacerts` secret.**
 
-1. To clean up, execute the following command:
+The command generates the certificate and key files in a directory named after the **current context** from your `kubeconfig` file.
 
-    ```console
-    $ kubectl delete -f tcp-echo.yaml
-    service "tcp-echo" deleted
-    deployment.apps "tcp-echo" deleted
-    ```
+```bash
+make -f Makefile.k8s.mk $(cluster name)-cacerts
+```
+
+Afterwards, running the above command will generate an **Intermediate CA** certificate based on the root CA. For example, if you want to create an intermediate CA for `cluster01`, you would run the following command:
+
+```bash
+make -f Makefile.k8s.mk cluster01-cacerts
+```
